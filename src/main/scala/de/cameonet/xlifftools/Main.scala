@@ -23,11 +23,10 @@ object Main {
 
     val parser = new ArgotParser("cameoXliffTools")
 
-    // parameters
-    val mode = parser.parameter[String]("mode", "[import|export]", optional = false)
 
-    // options
-    val jsonSource = parser.option[File]("source", "FILE", "source file for JSON import") {
+    val mode = parser.option[String](List("m","mode"), "MODE", "[import|export|merge] required")
+
+    val jsonSource = parser.option[File](List("s","source"), "FILE", "source file for JSON import") {
       (s, opt) =>
         val file = new File(s)
         if (!file.exists) {
@@ -86,7 +85,7 @@ object Main {
             case None       => parser.usage("no source file defined")
             case Some(file) => mergeJson(file, xliffDir)
           }
-        case _              => parser.usage()
+        case _              => parser.usage("No mode selected.")
       }
 
       println("DONE")
