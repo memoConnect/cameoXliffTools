@@ -21,8 +21,10 @@ object Main {
 
   def main(args: Array[String]) {
 
-    val parser = new ArgotParser("cameoXliffTools")
+    // set charset to utf-8
+    System.setProperty("file.encoding", "UTF-8")
 
+    val parser = new ArgotParser("cameoXliffTools")
 
     val mode = parser.option[String](List("m","mode"), "MODE", "[import|export|merge] required")
 
