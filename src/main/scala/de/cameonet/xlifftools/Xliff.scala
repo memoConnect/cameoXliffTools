@@ -16,7 +16,7 @@ object XliffFactory {
 
   def apply(targetLang: String, sourceLang: String): Xliff = {
     val emptyXliff =
-      <xliff xmlns="urn:oasis:names:tc:xliff:document:1.2" version="1.2">
+      <xliff xmlns="urn:oasis:names:tc:xliff:document:1.1" version="1.1">
           <file source-language={ sourceLang } datatype="plaintext" original={ sourceLang + ".json" }>
             <body>
             </body>
