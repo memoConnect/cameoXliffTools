@@ -1,14 +1,14 @@
 package de.cameonet.xlifftools
 
-import java.io.{ ByteArrayInputStream, File }
+import java.io.{File, FileInputStream}
+import java.util.Properties
 
 import com.fasterxml.jackson.core.JsonParseException
+import com.typesafe.config.{ConfigFactory, Config}
+import org.clapper.argot.ArgotConverters._
 import org.clapper.argot._
-import ArgotConverters._
-import play.api.libs.json.{ JsObject, Json }
-import de.cameonet.xlifftools._
+import play.api.libs.json.{JsObject, Json}
 
-import scala.collection.mutable
 import scala.io.Source
 
 /**
@@ -26,9 +26,9 @@ object Main {
 
     val parser = new ArgotParser("cameoXliffTools")
 
-    val mode = parser.option[String](List("m","mode"), "MODE", "[import|export|merge] required")
+    val mode = parser.option[String](List("m", "mode"), "MODE", "[import|export|merge] required")
 
-    val jsonSource = parser.option[File](List("s","source"), "FILE", "source file for JSON import") {
+    val jsonSource = parser.option[File](List("s", "source"), "FILE", "source file for JSON import") {
       (s, opt) =>
         val file = new File(s)
         if (!file.exists) {
@@ -50,6 +50,11 @@ object Main {
       (s, opt) => new File(s)
     }
 
+    val propertiesDefault = "properties"
+    val maybePropertiesDir = parser.option[File]("properties-dir", "DIRECTORY", "path to java property files. Default: ./" + propertiesDefault) {
+      (s, opt) => new File(s)
+    }
+
     val languages = parser.multiOption[String](List("l", "languages"), "LANG", "Will be created if it does not exist.")
 
     try {
@@ -57,6 +62,7 @@ object Main {
 
       val xliffDir: File = maybeXliffDir.value.getOrElse(new File(xliffDefault))
       val jsonDir: File = maybeJsonDir.value.getOrElse(new File(jsonDefault))
+      val propertiesDir: File = maybePropertiesDir.value.getOrElse(new File(propertiesDefault))
 
       // check directories
       if (!xliffDir.exists() && !xliffDir.mkdirs()) {
@@ -73,21 +79,28 @@ object Main {
         parser.usage("not a directory: " + jsonDir.getAbsolutePath)
       }
 
+      if (!propertiesDir.exists() && !propertiesDir.mkdirs()) {
+        throw new ConversionException("could not create properties-dir: " + propertiesDir.getAbsolutePath)
+      }
+      if (!propertiesDir.isDirectory) {
+        parser.usage("not a directory: " + propertiesDir.getAbsolutePath)
+      }
+
       mode.value match {
         case Some("import") =>
-          // check if jsonSource exists
+          // check if source file exists
           jsonSource.value match {
-            case None       => parser.usage("no source file defined")
-            case Some(file) => importJson(file, xliffDir, languages.value)
+            case None => parser.usage("no source file defined")
+            case Some(file) => importFile(file, xliffDir, languages.value)
           }
         case Some("export") => exportToJson(jsonDir, xliffDir)
         case Some("merge") =>
-          // check if jsonSource exists
+          // check if source file exists
           jsonSource.value match {
-            case None       => parser.usage("no source file defined")
+            case None => parser.usage("no source file defined")
             case Some(file) => mergeJson(file, xliffDir)
           }
-        case _              => parser.usage("No mode selected.")
+        case _ => parser.usage("No mode selected.")
       }
 
       println("DONE")
@@ -95,19 +108,16 @@ object Main {
     } catch {
       case e: ArgotUsageException => println(e.message)
       case e: ConversionException => println("ERROR: " + e.message)
-      case e: JsonParseException  => println("Error parsing json: " + e.getMessage)
+      case e: JsonParseException => println("Error parsing json: " + e.getMessage)
     }
 
   }
 
-  def importJson(jsonFile: File, xliffDir: File, languages: Seq[String]): Unit = {
+  def importFile(sourceFile: File, xliffDir: File, languages: Seq[String]): Unit = {
 
     // get source language from name of jsonFile
-    val sourceLang = getFileNameWithoutExtention(jsonFile)
+    val sourceLang = getFileNameWithoutExtention(sourceFile)
     println("Using \"" + sourceLang + "\" as source language")
-
-    // parse source json
-    val json = Json.parse(Source.fromFile(jsonFile).mkString).as[JsObject]
 
     // get existing xliff files
     val xliffFiles: Array[File] = xliffDir.listFiles.filter(_.getName.endsWith(".xlf"))
@@ -118,9 +128,20 @@ object Main {
     // read existing xliff files and create empty ones for new languages
     val xliffs: Seq[Xliff] = xliffFiles.toSeq.map(XliffFactory(_)) ++ newLanguages.map(XliffFactory(_, sourceLang))
 
-    // update xliff with source json and write to file
-    xliffs.foreach(_.update(json).writeToFile(xliffDir))
+    // get file type of source from extension and update xliffs accordingly
+    sourceFile.getName.split('.').last match {
+      case "json" =>
+        // parse json
+        val json = Json.parse(Source.fromFile(sourceFile).mkString).as[JsObject]
+        xliffs.foreach(_.updateFromJson(json).writeToFile(xliffDir))
+      case "properties" =>
+        // parse properties file
+        val properties: Config = ConfigFactory.parseFile(sourceFile)
+        xliffs.foreach(_.updateFromProperties(properties).writeToFile(xliffDir))
+      case x => throw new ConversionException("unsupported file type: " + x)
+    }
   }
+
 
   def exportToJson(jsonDir: File, xliffDir: File): Unit = {
     // read existing xliff files
@@ -135,7 +156,7 @@ object Main {
 
     // parse  json
     val json = Json.parse(Source.fromFile(jsonFile).mkString).as[JsObject]
-    
+
     // try to find corresponding xliff
     val xliffFiles = xliffDir.listFiles.filter(_.getName.endsWith(".xlf"))
     xliffFiles.find(file => getFileNameWithoutExtention(file).equals(lang)) match {
